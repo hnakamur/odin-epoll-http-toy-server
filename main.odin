@@ -33,7 +33,8 @@ serve :: proc(server_fd: linux.Fd) {
 		for i := i32(0); i < nfds; i += 1 {
 			if events[i].data.fd == server_fd {
 				addr: linux.Sock_Addr_Any
-				client_fd, errno := linux.accept(server_fd, &addr)
+				sockflags: linux.Socket_FD_Flags = {.NONBLOCK}
+				client_fd, errno := linux.accept(server_fd, &addr, sockflags)
 				if errno != .NONE {
 					fmt.eprintf("accept failed: errno=%v\n", errno)
 					return
@@ -62,7 +63,7 @@ serve :: proc(server_fd: linux.Fd) {
 					return
 				}
 				if n <= 0 {
-                    net.close(client_socket)
+					net.close(client_socket)
 				} else {
 					content := "Hello, world!\n"
 					res := fmt.bprintf(
