@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:net"
+import "core:thread"
 import "core:sys/linux"
 
 MAX_EVENTS :: 512
@@ -128,5 +129,34 @@ main :: proc() {
 		return
 	}
 
-	serve(os_sock)
+	worker_proc :: proc(t: ^thread.Thread) {
+		serve(linux.Fd(t.user_index))
+	}
+
+	THREAD_POOL_SIZE := 24
+	threads := make([dynamic]^thread.Thread, 0, THREAD_POOL_SIZE)
+	defer delete(threads)
+
+	for i := 0; i < THREAD_POOL_SIZE; i += 1 {
+		if t := thread.create(worker_proc); t != nil {
+			t.init_context = context
+			t.user_index = int(os_sock)
+			append(&threads, t)
+			thread.start(t)
+		}
+	}
+
+	for len(threads) > 0 {
+		for i := 0; i < len(threads); /**/ {
+			if t := threads[i]; thread.is_done(t) {
+				fmt.printf("Thread %d is done\n", t.user_index)
+				thread.destroy(t)
+
+				ordered_remove(&threads, i)
+			} else {
+				i += 1
+			}
+		}
+	}
+
 }
