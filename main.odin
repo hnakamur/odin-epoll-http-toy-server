@@ -108,9 +108,11 @@ serve :: proc(server_fd: linux.Fd) {
 						"toy-server",
 						content,
 					)
-					n, err = net.send_tcp(client_socket, buf[:len(res)])
-					if err != nil {
-						fmt.eprintf("send_tcp failed: err=%v\n", err)
+					iov := [1]linux.IO_Vec{
+						{base = raw_data(buf[:]), len = len(res)},
+					}
+					if _, errno := linux.writev(client_fd, iov[:]); errno != nil {
+						fmt.eprintf("send_tcp failed: errno=%v\n", errno)
 						return
 					}
 				}
