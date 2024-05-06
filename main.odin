@@ -49,6 +49,21 @@ close_connection :: proc(c: ^Conn, free_connections: ^^Conn, free_connection_n: 
 	linux.close(c.fd)
 }
 
+@(private)
+errno_unwrap2 :: #force_inline proc "contextless" (ret: $P, $T: typeid) -> (T, linux.Errno) {
+	if ret < 0 {
+		default_value: T
+		return default_value, linux.Errno(-ret)
+	} else {
+		return cast(T) ret, linux.Errno(.NONE)
+	}
+}
+
+epoll_create1 :: proc() -> (linux.Fd, linux.Errno) {
+	ret := linux.syscall(linux.SYS_epoll_create1, i32(0))
+	return errno_unwrap2(ret, linux.Fd)
+}
+
 serve :: proc(server_fd: linux.Fd) {
 	connections: [WORKER_CONNECTIONS]Conn
 
@@ -57,7 +72,7 @@ serve :: proc(server_fd: linux.Fd) {
 	free_connections := &connections[0]
 	free_connection_n := connection_n
 
-	epoll_fd, errno := linux.epoll_create(1)
+	epoll_fd, errno := epoll_create1()
 	if errno != .NONE {
 		fmt.eprintf("epoll_create failed: errno=%v\n", errno)
 		return
