@@ -39,11 +39,15 @@ serve :: proc(server_fd: linux.Fd) {
 					fmt.eprintf("accept failed: errno=%v\n", errno)
 					return
 				}
-				client_socket: net.Any_Socket = cast(net.TCP_Socket)client_fd
-				if err := net.set_blocking(client_socket, false); err != nil {
-					fmt.eprintf("set_blocking failed: errno=%v\n", errno)
-					return
-				}
+
+				// NOTE: Not vital to succeed; error ignored
+				no_delay: b32 = true
+				_ = linux.setsockopt(
+					client_fd,
+					linux.SOL_TCP,
+					linux.Socket_TCP_Option.NODELAY,
+					&no_delay,
+				)
 
 				ev := linux.EPoll_Event {
 					events = .IN | .RDHUP | .ET,
