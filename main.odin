@@ -2,8 +2,8 @@ package main
 
 import "core:fmt"
 import "core:net"
-import "core:thread"
 import "core:sys/linux"
+import "core:thread"
 
 MAX_EVENTS :: 512
 
@@ -23,6 +23,7 @@ serve :: proc(server_fd: linux.Fd) {
 		return
 	}
 
+	server_fd_requests: u64
 	events: [MAX_EVENTS]linux.EPoll_Event = ---
 	for {
 		nfds, errno := linux.epoll_wait(epoll_fd, raw_data(events[:]), MAX_EVENTS, -1)
@@ -39,6 +40,29 @@ serve :: proc(server_fd: linux.Fd) {
 				if errno != .NONE {
 					fmt.eprintf("accept failed: errno=%v\n", errno)
 					return
+				}
+
+				/*
+                 * Re-add the socket periodically so that other worker threads
+                 * will get a chance to accept connections.
+                 * See ngx_reorder_accept_events.
+                 */
+				server_fd_requests += 1
+				if server_fd_requests % 16 == 0 {
+					ev: linux.EPoll_Event
+					if errno := linux.epoll_ctl(epoll_fd, .DEL, server_fd, &ev); errno != .NONE {
+						fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+						return
+					}
+
+					ev = linux.EPoll_Event {
+						events = .IN | .EXCLUSIVE,
+						data = linux.EPoll_Data{fd = server_fd},
+					}
+					if errno := linux.epoll_ctl(epoll_fd, .ADD, server_fd, &ev); errno != .NONE {
+						fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+						return
+					}
 				}
 
 				// NOTE: Not vital to succeed; error ignored
@@ -147,7 +171,7 @@ main :: proc() {
 	}
 
 	for len(threads) > 0 {
-		for i := 0; i < len(threads); /**/ {
+		for i := 0; i < len(threads);  /**/{
 			if t := threads[i]; thread.is_done(t) {
 				fmt.printf("Thread %d is done\n", t.user_index)
 				thread.destroy(t)
