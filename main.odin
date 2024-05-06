@@ -32,18 +32,18 @@ serve :: proc(server_fd: linux.Fd) {
 
 		for i := i32(0); i < nfds; i += 1 {
 			if events[i].data.fd == server_fd {
-				server_socket: net.TCP_Socket = cast(net.TCP_Socket)server_fd
-				client_socket, addr, err := net.accept_tcp(server_socket)
-				if err != nil {
-					fmt.eprintf("accept failed: err=%v\n", err)
+				addr: linux.Sock_Addr_Any
+				client_fd, errno := linux.accept(server_fd, &addr)
+				if errno != .NONE {
+					fmt.eprintf("accept failed: errno=%v\n", errno)
 					return
 				}
+				client_socket: net.Any_Socket = cast(net.TCP_Socket)client_fd
 				if err := net.set_blocking(client_socket, false); err != nil {
 					fmt.eprintf("set_blocking failed: errno=%v\n", errno)
 					return
 				}
 
-				client_fd := linux.Fd(client_socket)
 				ev := linux.EPoll_Event {
 					events = .IN | .RDHUP | .ET,
 					data = linux.EPoll_Data{fd = client_fd},
@@ -62,7 +62,7 @@ serve :: proc(server_fd: linux.Fd) {
 					return
 				}
 				if n <= 0 {
-					net.close(client_socket)
+                    net.close(client_socket)
 				} else {
 					content := "Hello, world!\n"
 					res := fmt.bprintf(
