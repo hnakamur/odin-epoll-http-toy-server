@@ -55,7 +55,7 @@ errno_unwrap2 :: #force_inline proc "contextless" (ret: $P, $T: typeid) -> (T, l
 		default_value: T
 		return default_value, linux.Errno(-ret)
 	} else {
-		return cast(T) ret, linux.Errno(.NONE)
+		return cast(T)ret, linux.Errno(.NONE)
 	}
 }
 
@@ -256,17 +256,7 @@ main :: proc() {
 		}
 	}
 
-	for len(threads) > 0 {
-		for i := 0; i < len(threads);  /**/{
-			if t := threads[i]; thread.is_done(t) {
-				fmt.printf("Thread %d is done\n", t.user_index)
-				thread.destroy(t)
-
-				ordered_remove(&threads, i)
-			} else {
-				i += 1
-			}
-		}
+	for t in threads {
+		thread.join(t)
 	}
-
 }
