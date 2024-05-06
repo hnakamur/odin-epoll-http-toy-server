@@ -83,7 +83,7 @@ serve :: proc(server_fd: linux.Fd) {
 		data = linux.EPoll_Data{fd = server_fd},
 	}
 	if errno := linux.epoll_ctl(epoll_fd, .ADD, server_fd, &ev); errno != .NONE {
-		fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+		fmt.eprintf("epoll_ctl#1 failed: errno=%v\n", errno)
 		return
 	}
 
@@ -118,7 +118,7 @@ serve :: proc(server_fd: linux.Fd) {
 				if server_fd_requests % 16 == 0 {
 					ev: linux.EPoll_Event
 					if errno := linux.epoll_ctl(epoll_fd, .DEL, server_fd, &ev); errno != .NONE {
-						fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+						fmt.eprintf("epoll_ctl#2 failed: errno=%v\n", errno)
 						return
 					}
 
@@ -127,7 +127,7 @@ serve :: proc(server_fd: linux.Fd) {
 						data = linux.EPoll_Data{fd = server_fd},
 					}
 					if errno := linux.epoll_ctl(epoll_fd, .ADD, server_fd, &ev); errno != .NONE {
-						fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+						fmt.eprintf("epoll_ctl#3 failed: errno=%v\n", errno)
 						return
 					}
 				}
@@ -140,7 +140,7 @@ serve :: proc(server_fd: linux.Fd) {
 					data = linux.EPoll_Data{ptr = c},
 				}
 				if errno := linux.epoll_ctl(epoll_fd, .ADD, client_fd, &ev); errno != .NONE {
-					fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+					fmt.eprintf("epoll_ctl#4 failed: errno=%v\n", errno)
 					return
 				}
 			} else {
