@@ -126,8 +126,7 @@ serve :: proc(server_fd: linux.Fd) {
 
 // Copied from https://github.com/odin-lang/Odin/pull/3125/files
 ioctl :: proc "contextless" (fd: linux.Fd, request: i32, arg: uintptr) -> int {
-	ret := linux.syscall(linux.SYS_ioctl, fd, request, arg)
-	return ret
+	return linux.syscall(linux.SYS_ioctl, fd, request, arg)
 }
 
 FIONBIO :: 0x5421
@@ -157,7 +156,7 @@ main :: proc() {
 		fmt.eprintf("setsockopt REUSEADDR failed: err=%v\n", net.Listen_Error(errno))
 	}
 
-	nb: u32 = 1;
+	nb: b32 = true;
 	if ioctl(os_sock, FIONBIO, uintptr(&nb)) == -1 {
 		fmt.eprintf("ioctl FIONBIO failed\n")
 		return
