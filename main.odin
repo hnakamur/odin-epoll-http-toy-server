@@ -87,7 +87,6 @@ serve :: proc(server_fd: linux.Fd) {
 				}
 			} else {
 				client_fd := events[i].data.fd
-				client_socket: net.TCP_Socket = cast(net.TCP_Socket)client_fd
 				buf: [1024]byte = ---
 				n, errno := linux.recv(client_fd, buf[:], {})
 				if errno != .NONE {
@@ -131,43 +130,43 @@ ioctl :: proc "contextless" (fd: linux.Fd, request: i32, arg: uintptr) -> int {
 FIONBIO :: 0x5421
 
 main :: proc() {
-	os_sock, errno := linux.socket(.INET, .STREAM, {}, {})
+	server_fd, errno := linux.socket(.INET, .STREAM, {}, {})
 	if errno != nil {
 		fmt.eprintf("create_socket failed: errno=%v\n", errno)
 		return
 	}
-	server_fd := net.TCP_Socket(os_sock)
-	defer net.close(server_fd)
+	defer linux.close(server_fd)
 
-	server_addr := net.Endpoint {
-		address = net.IP4_Any,
-		port    = 3000,
-	}
-
-	// os_sock := linux.Fd(server_fd.(net.TCP_Socket))
 	do_reuse_addr: b32 = true
 	if errno := linux.setsockopt(
-		os_sock,
+		server_fd,
 		linux.SOL_SOCKET,
 		linux.Socket_Option.REUSEADDR,
 		&do_reuse_addr,
 	); errno != .NONE {
-		fmt.eprintf("setsockopt REUSEADDR failed: err=%v\n", net.Listen_Error(errno))
+		fmt.eprintf("setsockopt REUSEADDR failed: errno=%v\n", errno)
 	}
 
 	nb: b32 = true;
-	if ioctl(os_sock, FIONBIO, uintptr(&nb)) == -1 {
+	if ioctl(server_fd, FIONBIO, uintptr(&nb)) == -1 {
 		fmt.eprintf("ioctl FIONBIO failed\n")
 		return
 	}
 
-	if err := net.bind(server_fd, server_addr); err != nil {
-		fmt.eprintf("bind failed: err=%v\n", err)
+	server_addr := linux.Sock_Addr_Any {
+		ipv4 = {
+			sin_family = .INET,
+			sin_port = u16be(3000),
+			sin_addr = transmute([4]u8) net.IP4_Any,
+		}
+	}
+	if errno := linux.bind(server_fd, &server_addr); errno != .NONE {
+		fmt.eprintf("bind failed: errno=%v\n", errno)
 		return
 	}
 
-	if err := linux.listen(os_sock, 511); err != nil {
-		fmt.eprintf("listen failed: err=%v\n", err)
+	if err := linux.listen(server_fd, 511); errno != .NONE {
+		fmt.eprintf("listen failed: errno=%v\n", errno)
 		return
 	}
 
@@ -182,7 +181,7 @@ main :: proc() {
 	for i := 0; i < THREAD_POOL_SIZE; i += 1 {
 		if t := thread.create(worker_proc); t != nil {
 			t.init_context = context
-			t.user_index = int(os_sock)
+			t.user_index = int(server_fd)
 			append(&threads, t)
 			thread.start(t)
 		}
