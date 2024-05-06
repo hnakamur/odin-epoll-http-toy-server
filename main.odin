@@ -133,11 +133,12 @@ ioctl :: proc "contextless" (fd: linux.Fd, request: i32, arg: uintptr) -> int {
 FIONBIO :: 0x5421
 
 main :: proc() {
-	server_fd, err := net.create_socket(.IP4, .TCP)
-	if err != nil {
-		fmt.eprintf("create_socket failed: err=%v\n", err)
+	os_sock, errno := linux.socket(.INET, .STREAM, {}, {})
+	if errno != nil {
+		fmt.eprintf("create_socket failed: errno=%v\n", errno)
 		return
 	}
+	server_fd := net.TCP_Socket(os_sock)
 	defer net.close(server_fd)
 
 	server_addr := net.Endpoint {
@@ -145,7 +146,7 @@ main :: proc() {
 		port    = 3000,
 	}
 
-	os_sock := linux.Fd(server_fd.(net.TCP_Socket))
+	// os_sock := linux.Fd(server_fd.(net.TCP_Socket))
 	do_reuse_addr: b32 = true
 	if errno := linux.setsockopt(
 		os_sock,
@@ -158,11 +159,11 @@ main :: proc() {
 
 	nb: u32 = 1;
 	if ioctl(os_sock, FIONBIO, uintptr(&nb)) == -1 {
-		fmt.eprintf("ioctl FIONBIO failed: err=%v\n", err)
+		fmt.eprintf("ioctl FIONBIO failed\n")
 		return
 	}
 
-	if err = net.bind(server_fd, server_addr); err != nil {
+	if err := net.bind(server_fd, server_addr); err != nil {
 		fmt.eprintf("bind failed: err=%v\n", err)
 		return
 	}
