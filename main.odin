@@ -103,7 +103,6 @@ serve :: proc(server_fd: linux.Fd) {
 						"HTTP/1.1 200 OK\r\n" +
 						"Content-Type: text/plain\r\n" +
 						"Content-Length: %d\r\n" +
-						"Connection: close\r\n" +
 						"Server: %s\r\n" +
 						"\r\n" +
 						"%s",
