@@ -95,7 +95,7 @@ serve :: proc(server_fd: linux.Fd) {
 					return
 				}
 				if n <= 0 {
-					net.close(client_socket)
+					linux.close(client_fd)
 				} else {
 					content := "Hello, world!\n"
 					res := fmt.bprintf(
