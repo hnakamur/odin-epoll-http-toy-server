@@ -38,6 +38,9 @@ serve :: proc(server_fd: linux.Fd) {
 				sockflags: linux.Socket_FD_Flags = {.NONBLOCK}
 				client_fd, errno := linux.accept(server_fd, &addr, sockflags)
 				if errno != .NONE {
+					if errno == .EAGAIN {
+						continue
+					}
 					fmt.eprintf("accept failed: errno=%v\n", errno)
 					return
 				}
@@ -121,6 +124,14 @@ serve :: proc(server_fd: linux.Fd) {
 	}
 }
 
+// Copied from https://github.com/odin-lang/Odin/pull/3125/files
+ioctl :: proc "contextless" (fd: linux.Fd, request: i32, arg: uintptr) -> int {
+	ret := linux.syscall(linux.SYS_ioctl, fd, request, arg)
+	return ret
+}
+
+FIONBIO :: 0x5421
+
 main :: proc() {
 	server_fd, err := net.create_socket(.IP4, .TCP)
 	if err != nil {
@@ -143,6 +154,12 @@ main :: proc() {
 		&do_reuse_addr,
 	); errno != .NONE {
 		fmt.eprintf("setsockopt REUSEADDR failed: err=%v\n", net.Listen_Error(errno))
+	}
+
+	nb: u32 = 1;
+	if ioctl(os_sock, FIONBIO, uintptr(&nb)) == -1 {
+		fmt.eprintf("ioctl FIONBIO failed: err=%v\n", err)
+		return
 	}
 
 	if err = net.bind(server_fd, server_addr); err != nil {
