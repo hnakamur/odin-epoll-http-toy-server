@@ -89,9 +89,9 @@ serve :: proc(server_fd: linux.Fd) {
 				client_fd := events[i].data.fd
 				client_socket: net.TCP_Socket = cast(net.TCP_Socket)client_fd
 				buf: [1024]byte = ---
-				n, err := net.recv_tcp(client_socket, buf[:])
-				if err != nil {
-					fmt.eprintf("recv_tcp failed: err=%v\n", err)
+				n, errno := linux.recv(client_fd, buf[:], {})
+				if errno != .NONE {
+					fmt.eprintf("recv_tcp failed: errno=%v\n", errno)
 					return
 				}
 				if n <= 0 {
