@@ -6,8 +6,57 @@ import "core:sys/linux"
 import "core:thread"
 
 MAX_EVENTS :: 512
+WORKER_CONNECTIONS :: 1024
+
+Conn :: struct {
+	next:        ^Conn,
+	fd:          linux.Fd,
+	nodelay_set: bool,
+}
+
+init_connections :: proc(connections: []Conn, n: int) {
+	next: ^Conn = nil
+	for i := n - 1; i >= 0; i -= 1 {
+		connections[i] = Conn {
+			next = next,
+			fd   = -1,
+		}
+
+		next = &connections[i]
+	}
+}
+
+get_connection :: proc(free_connections: ^^Conn, free_connection_n: ^int) -> ^Conn {
+	c: ^Conn = free_connections^
+	if c == nil {
+		fmt.eprintln("worker_connections are not enough")
+		return nil
+	}
+	free_connections^ = c.next
+	free_connection_n^ -= 1
+	c.nodelay_set = false
+	return c
+}
+
+free_connection :: proc(c: ^Conn, free_connections: ^^Conn, free_connection_n: ^int) {
+	c.next = free_connections^
+	free_connections^ = c
+	free_connection_n^ += 1
+}
+
+close_connection :: proc(c: ^Conn, free_connections: ^^Conn, free_connection_n: ^int) {
+	free_connection(c, free_connections, free_connection_n)
+	linux.close(c.fd)
+}
 
 serve :: proc(server_fd: linux.Fd) {
+	connections: [WORKER_CONNECTIONS]Conn
+
+	connection_n := WORKER_CONNECTIONS
+	init_connections(connections[:], connection_n)
+	free_connections := &connections[0]
+	free_connection_n := connection_n
+
 	epoll_fd, errno := linux.epoll_create(1)
 	if errno != .NONE {
 		fmt.eprintf("epoll_create failed: errno=%v\n", errno)
@@ -68,25 +117,20 @@ serve :: proc(server_fd: linux.Fd) {
 					}
 				}
 
-				// NOTE: Not vital to succeed; error ignored
-				no_delay: b32 = true
-				_ = linux.setsockopt(
-					client_fd,
-					linux.SOL_TCP,
-					linux.Socket_TCP_Option.NODELAY,
-					&no_delay,
-				)
+				c := get_connection(&free_connections, &free_connection_n)
+				c.fd = client_fd
 
 				ev := linux.EPoll_Event {
 					events = .IN | .RDHUP | .ET,
-					data = linux.EPoll_Data{fd = client_fd},
+					data = linux.EPoll_Data{ptr = c},
 				}
 				if errno := linux.epoll_ctl(epoll_fd, .ADD, client_fd, &ev); errno != .NONE {
 					fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
 					return
 				}
 			} else {
-				client_fd := events[i].data.fd
+				c := (^Conn)(events[i].data.ptr)
+				client_fd := c.fd
 				buf: [1024]byte = ---
 				n, errno := linux.recv(client_fd, buf[:], {})
 				if errno != .NONE {
@@ -94,7 +138,7 @@ serve :: proc(server_fd: linux.Fd) {
 					return
 				}
 				if n <= 0 {
-					linux.close(client_fd)
+					close_connection(c, &free_connections, &free_connection_n)
 				} else {
 					content := "Hello, world!\n"
 					res := fmt.bprintf(
@@ -109,12 +153,22 @@ serve :: proc(server_fd: linux.Fd) {
 						"toy-server",
 						content,
 					)
-					iov := [1]linux.IO_Vec{
-						{base = raw_data(buf[:]), len = len(res)},
-					}
+					iov := [1]linux.IO_Vec{{base = raw_data(buf[:]), len = len(res)}}
 					if _, errno := linux.writev(client_fd, iov[:]); errno != nil {
 						fmt.eprintf("send_tcp failed: errno=%v\n", errno)
 						return
+					} else {
+						if !c.nodelay_set {
+							// NOTE: Not vital to succeed; error ignored
+							no_delay: b32 = true
+							_ = linux.setsockopt(
+								client_fd,
+								linux.SOL_TCP,
+								linux.Socket_TCP_Option.NODELAY,
+								&no_delay,
+							)
+							c.nodelay_set = true
+						}
 					}
 				}
 			}
@@ -147,7 +201,7 @@ main :: proc() {
 		fmt.eprintf("setsockopt REUSEADDR failed: errno=%v\n", errno)
 	}
 
-	nb: b32 = true;
+	nb: b32 = true
 	if ioctl(server_fd, FIONBIO, uintptr(&nb)) == -1 {
 		fmt.eprintf("ioctl FIONBIO failed\n")
 		return
@@ -157,8 +211,8 @@ main :: proc() {
 		ipv4 = {
 			sin_family = .INET,
 			sin_port = u16be(3000),
-			sin_addr = transmute([4]u8) net.IP4_Any,
-		}
+			sin_addr = transmute([4]u8)net.IP4_Any,
+		},
 	}
 	if errno := linux.bind(server_fd, &server_addr); errno != .NONE {
 		fmt.eprintf("bind failed: errno=%v\n", errno)
