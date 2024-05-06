@@ -4,6 +4,91 @@ import "core:fmt"
 import "core:net"
 import "core:sys/linux"
 
+MAX_EVENTS :: 512
+
+serve :: proc(server_fd: linux.Fd) {
+	epoll_fd, errno := linux.epoll_create(1)
+	if errno != .NONE {
+		fmt.eprintf("epoll_create failed: errno=%v\n", errno)
+		return
+	}
+
+	ev := linux.EPoll_Event {
+		events = .IN | .EXCLUSIVE,
+		data = linux.EPoll_Data{fd = server_fd},
+	}
+	if errno := linux.epoll_ctl(epoll_fd, .ADD, server_fd, &ev); errno != .NONE {
+		fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+		return
+	}
+
+	events: [MAX_EVENTS]linux.EPoll_Event = ---
+	for {
+		nfds, errno := linux.epoll_wait(epoll_fd, raw_data(events[:]), MAX_EVENTS, -1)
+		if errno != .NONE {
+			fmt.eprintf("epoll_wait failed: errno=%v\n", errno)
+			return
+		}
+
+		for i := i32(0); i < nfds; i += 1 {
+			if events[i].data.fd == server_fd {
+				addr: linux.Sock_Addr_Any
+				client_fd, errno := linux.accept(server_fd, &addr)
+				if errno != .NONE {
+					fmt.eprintf("accept failed: errno=%v\n", errno)
+					return
+				}
+				client_socket: net.Any_Socket = cast(net.TCP_Socket)client_fd
+				if err := net.set_blocking(client_socket, false); err != nil {
+					fmt.eprintf("set_blocking failed: errno=%v\n", errno)
+					return
+				}
+
+				ev := linux.EPoll_Event {
+					events = .IN | .RDHUP | .ET,
+					data = linux.EPoll_Data{fd = client_fd},
+				}
+				if errno := linux.epoll_ctl(epoll_fd, .ADD, client_fd, &ev); errno != .NONE {
+					fmt.eprintf("epoll_ctl failed: errno=%v\n", errno)
+					return
+				}
+			} else {
+				client_fd := events[i].data.fd
+				client_socket: net.TCP_Socket = cast(net.TCP_Socket)client_fd
+				buf: [1024]byte = ---
+				n, err := net.recv_tcp(client_socket, buf[:])
+				if err != nil {
+					fmt.eprintf("recv_tcp failed: err=%v\n", err)
+					return
+				}
+				if n <= 0 {
+                    net.close(client_socket)
+				} else {
+					content := "Hello, world!\n"
+					res := fmt.bprintf(
+						buf[:],
+						"HTTP/1.1 200 OK\r\n" +
+						"Content-Type: text/plain\r\n" +
+						"Content-Length: %d\r\n" +
+						"Connection: close\r\n" +
+						"Server: %s\r\n" +
+						"\r\n" +
+						"%s",
+						len(content),
+						"toy-server",
+						content,
+					)
+					n, err = net.send_tcp(client_socket, buf[:len(res)])
+					if err != nil {
+						fmt.eprintf("send_tcp failed: err=%v\n", err)
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
 main :: proc() {
 	server_fd, err := net.create_socket(.IP4, .TCP)
 	if err != nil {
@@ -38,35 +123,5 @@ main :: proc() {
 		return
 	}
 
-	if client, source, err := net.accept_tcp(server_fd.(net.TCP_Socket)); err != nil {
-		fmt.eprintf("accept_tcp failed: err=%v\n", err)
-		return
-	} else {
-		// fmt.printf("accepted, source=%v\n", source)
-		buf: [1024]byte = ---
-		n, err := net.recv_tcp(client, buf[:])
-		if err != nil {
-			fmt.eprintf("recv_tcp failed: err=%v\n", err)
-			return
-		}
-		// fmt.printf("recv_tcp, n=%d, req=%s\n", n, buf[:n])
-
-		content := "Hello, world!\n"
-		res := fmt.bprintf(
-			buf[:],
-			"HTTP/1.1 200 OK\r\n" +
-			"Content-Type: text/plain\r\n" +
-			"Content-Length: %d\r\n" +
-			"Connection: close\r\n" +
-			"\r\n" +
-			"%s",
-			len(content),
-			content,
-		)
-		n, err = net.send_tcp(client, buf[:len(res)])
-		if err != nil {
-			fmt.eprintf("send_tcp failed: err=%v\n", err)
-			return
-		}
-	}
+	serve(os_sock)
 }
